@@ -63,7 +63,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📁 Файлы: <code>daily_messages/messages_YYYY-MM-DD.txt</code>\n"
         "📅 Каждый день — новый файл\n\n"
         "Команды:\n"
-        "/today — показать сообщения за сегодня"
+        "/today — показать сообщения за сегодня\n"
+        "/export — скачать файл за сегодня прямо в Telegram (удобно сохранить на ПК)"
     )
 
 
@@ -88,6 +89,33 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(f"📅 Сообщения за сегодня:\n\n{content}")
+
+
+async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет файл с сообщениями за сегодня прямо в чат (удобно скачать на ПК)"""
+    user = update.effective_user
+    logger.info(f"/export от @{user.username or user.first_name} (ID: {user.id})")
+
+    if not await is_owner(update):
+        return
+
+    filename = get_daily_filename()
+
+    if not os.path.exists(filename):
+        await update.message.reply_text("Сегодня пока нет сообщений для экспорта.")
+        return
+
+    try:
+        with open(filename, "rb") as f:
+            await update.message.reply_document(
+                document=f,
+                filename=os.path.basename(filename),
+                caption=f"📄 Файл с сообщениями за сегодня ({datetime.now().strftime('%d.%m.%Y')})"
+            )
+        logger.info(f"Файл {filename} отправлен пользователю")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке файла: {e}")
+        await update.message.reply_text("Не удалось отправить файл. Попробуй позже.")
 
 
 async def save_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,6 +158,7 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("today", today))
+    application.add_handler(CommandHandler("export", export))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save_message))
 
     logger.info("Бот успешно запущен и готов принимать сообщения")
