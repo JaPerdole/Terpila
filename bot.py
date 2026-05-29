@@ -1,4 +1,5 @@
 import os
+import logging
 from datetime import datetime
 
 from telegram import Update
@@ -10,9 +11,23 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# Настройка логирования (чтобы видеть в логах сервиса, что происходит)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # ==================== НАСТРОЙКИ ====================
-BOT_TOKEN = "ТОКЕН_ТВОЕГО_БОТА"          # ← Вставь сюда токен от @BotFather
-OWNER_ID = None                           # ← Вставь свой ID (число) или оставь None, чтобы бот был публичным
+# Бот берёт токен и ID из переменных окружения (рекомендуется для хостинга)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID = os.getenv("OWNER_ID")
+
+if OWNER_ID:
+    try:
+        OWNER_ID = int(OWNER_ID)
+    except ValueError:
+        OWNER_ID = None
 
 LOGS_DIR = "daily_messages"
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -25,61 +40,72 @@ def get_daily_filename() -> str:
 
 
 async def is_owner(update: Update) -> bool:
-    """Проверка, что сообщение от хозяина"""
     if OWNER_ID is None:
         return True
-    return update.effective_user.id == OWNER_ID
+    user_id = update.effective_user.id
+    is_authorized = user_id == OWNER_ID
+    if not is_authorized:
+        logger.warning(f"Отклонено сообщение от неавторизованного пользователя: {user_id}")
+    return is_authorized
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    logger.info(f"/start от @{user.username or user.first_name} (ID: {user.id})")
+
     if not await is_owner(update):
         await update.message.reply_text("Извини, этот бот только для хозяина.")
         return
 
     await update.message.reply_text(
         "Привет! 👋\n\n"
-        "Я бот-дневник. Всё, что ты мне напишешь, я сохраняю в ежедневные файлы.\n\n"
-        "📁 Файлы лежат в папке <code>daily_messages/</code>\n"
+        "Я бот-дневник. Всё, что ты мне напишешь — сохраняю в ежедневные файлы.\n\n"
+        "📁 Файлы: <code>daily_messages/messages_YYYY-MM-DD.txt</code>\n"
         "📅 Каждый день — новый файл\n\n"
-        "Доступные команды:\n"
-        "/today — показать все сообщения за сегодня\n"
-        "/start — это сообщение"
+        "Команды:\n"
+        "/today — показать сообщения за сегодня"
     )
 
 
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    logger.info(f"/today от @{user.username or user.first_name} (ID: {user.id})")
+
     if not await is_owner(update):
         return
 
     filename = get_daily_filename()
 
     if not os.path.exists(filename):
-        await update.message.reply_text("Сегодня пока нет сохранённых сообщений.")
+        await update.message.reply_text("Сегодня пока нет сообщений.")
         return
 
     with open(filename, "r", encoding="utf-8") as f:
         content = f.read().strip()
 
     if not content:
-        await update.message.reply_text("Сегодня пока нет сохранённых сообщений.")
+        await update.message.reply_text("Сегодня пока нет сообщений.")
         return
 
     await update.message.reply_text(f"📅 Сообщения за сегодня:\n\n{content}")
 
 
 async def save_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    logger.info(f"Получено сообщение от @{user.username or user.first_name} (ID: {user.id}): {update.message.text[:50]}...")
+
     if not await is_owner(update):
         await update.message.reply_text("Извини, этот бот только для хозяина.")
         return
 
     text = update.message.text
     if not text:
-        await update.message.reply_text("Пока я сохраняю только текстовые сообщения.")
+        await update.message.reply_text("Пока сохраняю только текстовые сообщения.")
         return
 
     filename = get_daily_filename()
     timestamp = datetime.now().strftime("%H:%M:%S")
-    user_name = update.effective_user.username or update.effective_user.first_name or str(update.effective_user.id)
+    user_name = user.username or user.first_name or str(user.id)
 
     file_exists = os.path.exists(filename)
 
@@ -89,13 +115,16 @@ async def save_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f.write(f"=== Сообщения за {date_str} ===\n\n")
         f.write(f"[{timestamp}] {user_name}: {text}\n")
 
+    logger.info(f"Сообщение сохранено в {filename}")
     await update.message.reply_text("✅ Сохранено")
 
 
 def main():
-    if BOT_TOKEN == "ТОКЕН_ТВОЕГО_БОТА":
-        print("❌ Ошибка: не указан BOT_TOKEN!")
+    if not BOT_TOKEN:
+        logger.error("Переменная окружения BOT_TOKEN не установлена!")
         return
+
+    logger.info("Бот запускается...")
 
     application = Application.builder().token(BOT_TOKEN).build()
 
@@ -103,7 +132,7 @@ def main():
     application.add_handler(CommandHandler("today", today))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save_message))
 
-    print("🤖 Бот запущен...")
+    logger.info("Бот успешно запущен и готов принимать сообщения")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
