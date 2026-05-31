@@ -1,6 +1,7 @@
 import os
 import logging
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -28,6 +29,10 @@ if OWNER_ID:
 
 LOGS_DIR = "daily_messages"
 os.makedirs(LOGS_DIR, exist_ok=True)
+
+# ==================== ВРЕМЕННАЯ ЗОНА ====================
+# Всегда используем московское время (MSK), даже если сервер в UTC/США
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 
 def get_filename(dt: datetime, fmt: str = "txt") -> str:
@@ -59,6 +64,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Привет! 👋\n\n"
         "Я бот-дневник. Всё, что ты мне напишешь — сохраняю в ежедневные файлы "
         "в двух форматах: <b>TXT</b> и <b>MD</b>.\n\n"
+        "🕒 Время везде — **московское** (MSK)\n\n"
         "📁 Файлы: <code>daily_messages/messages_YYYY-MM-DD.txt</code> и "
         "<code>daily_messages/messages_YYYY-MM-DD.md</code>\n"
         "📅 Каждый день — новые файлы\n\n"
@@ -67,8 +73,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/export или /exportTXT — скачать TXT-файл за сегодня\n"
         "/exportMD — скачать MD-файл за сегодня\n"
         "/yesterday или /yesterdayTXT — скачать TXT-файл за вчера\n"
-        "/yesterdayMD — скачать MD-файл за вчера\n\n"
-        "MD-версия удобна для просмотра в редакторах и красивого форматирования!"
+        "/yesterdayMD — скачать MD-файл за вчера"
     )
 
 
@@ -77,7 +82,7 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/today от @{user.username or user.first_name} (ID: {user.id})")
     if not await is_owner(update):
         return
-    filename = get_filename(datetime.now(), "txt")
+    filename = get_filename(datetime.now(MOSCOW_TZ), "txt")
     if not os.path.exists(filename):
         await update.message.reply_text("Сегодня пока нет сообщений.")
         return
@@ -93,7 +98,7 @@ async def send_daily_file(update: Update, days_offset: int, fmt: str):
     """Общая функция отправки файла за сегодня (offset=0) или вчера (offset=1)"""
     if not await is_owner(update):
         return
-    target_date = datetime.now() - timedelta(days=days_offset)
+    target_date = datetime.now(MOSCOW_TZ) - timedelta(days=days_offset)
     caption_prefix = "Сегодняшний" if days_offset == 0 else "Вчерашний"
     filename = get_filename(target_date, fmt)
     if not os.path.exists(filename):
@@ -140,9 +145,10 @@ async def save_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Пока сохраняю только текстовые сообщения.")
         return
 
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    now_msk = datetime.now(MOSCOW_TZ)
+    timestamp = now_msk.strftime("%H:%M:%S")
     user_name = user.username or user.first_name or str(user.id)
-    today = datetime.now()
+    today = now_msk
 
     # === Сохраняем в TXT ===
     txt_file = get_filename(today, "txt")
